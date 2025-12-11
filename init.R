@@ -1,4 +1,5 @@
 '%notin%' <- Negate('%in%')
+'%||%' <- function(x, y) if (is.null(x)) y else x
 
 source("r-utils/renv_helpers.R")
 

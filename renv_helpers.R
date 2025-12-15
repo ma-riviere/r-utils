@@ -1,5 +1,5 @@
 get_r_version <- function() {
-    return(paste0(version$major, ".", version$minor))
+    return(paste0(version$major, ".", sub("\\..*", "", version$minor)))
 }
 
 get_os_info <- function() {

@@ -1,7 +1,20 @@
 # Infix operators
 '%notin%' <- Negate('%in%')
+`%ni%` <- `%notin%` # Alias
 '%||%' <- function(x, y) if (is.null(x)) y else x
 '%|e|%' <- function(x, y) if (is.null(x) || length(x) == 0 || !nzchar(x)) y else x
+"%s+%" <- function(lhs, rhs) paste0(lhs, rhs)
+
+# Load individual files
+utils_files <- list.files(
+    here::here("r-utils"),
+    pattern = "*\\.R",
+    full.names = TRUE,
+    recursive = FALSE,
+    ignore.case = TRUE
+)
+utils_files <- utils_files[basename(utils_files) != "init.R"]
+void_ <- lapply(utils_files, source)
 
 # renv
-source("r-utils/renv/init.R")
+source(here::here("r-utils", "renv", "init.R"))

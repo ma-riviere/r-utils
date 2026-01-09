@@ -2,29 +2,8 @@ get_r_version <- function() {
     return(paste0(version$major, ".", sub("\\..*", "", version$minor)))
 }
 
-get_os_info <- function() {
-    os_type <- tolower(Sys.info()[[1]])
-    os_release_lines <- readLines("/etc/os-release")
-
-    os_info <- list()
-    for (line in os_release_lines) {
-        if (grepl("=", line)) {
-            parts <- strsplit(line, "=", fixed = TRUE)[[1]]
-            key <- tolower(trimws(parts[1]))
-            if (key %notin% c("id", "version_id", "version_codename")) {
-                next
-            }
-            value <- trimws(parts[2])
-            value <- gsub("\"", "", value, fixed = TRUE) # Remove all double quotes
-            os_info[[key]] <- tolower(value)
-        }
-    }
-    return(list(
-        os_type = os_type,
-        os_name = os_info$id,
-        os_version = os_info$version_id,
-        os_codename = os_info$version_codename
-    ))
+is_installed <- function(pkg) {
+    suppressMessages({require(pkg, quietly = TRUE, warn.conflicts = FALSE, character.only = TRUE)})
 }
 
 read_packages <- function(profile) {
@@ -83,4 +62,37 @@ install_profile_packages <- function(profile) {
 
     renv::install(packages, prompt = FALSE, rebuild = TRUE, repos = getOption("repos"))
     renv::snapshot(packages = sapply(packages, get_pkg_name), prompt = FALSE, force = TRUE)
+}
+
+install_profiles <- function(profiles = NULL) {
+    # Profiles to install
+    profiles_to_install <- get_user_profiles()
+    if (!is.null(profiles)) {
+        profiles_to_install <- intersect(profiles_to_install, profiles)
+    }
+    if (is.null(profiles_to_install) || length(profiles_to_install) == 0) {
+        return("No matching profiles")
+    }
+
+    # Cleaning existing library (to force reinstall from scratch)
+    unlink("renv/library", recursive = TRUE)
+    source("renv/activate.R")
+    renv::upgrade(prompt = FALSE)
+
+    # Create profiles
+    for (profile in profiles_to_install) {
+        cat("\nInstalling profile:", profile, "\n")
+        install_profile_packages(profile)
+    }
+
+    # Reset to default (or dev if it is defined)
+    dev_profile <- set_renv_profile("dev")
+    renv::activate(profile = dev_profile)
+    safe_restore()
+
+    # Cleaning root renv.lock (since we use profiles)
+    unlink("renv.lock")
+    unlink("renv/profile")
+
+    return(invisible(profiles_to_install))
 }

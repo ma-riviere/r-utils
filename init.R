@@ -7,7 +7,7 @@
 
 # Load individual files
 utils_files <- list.files(
-    here::here("r-utils"),
+    "r-utils",
     pattern = "*\\.R",
     full.names = TRUE,
     recursive = FALSE,
@@ -17,4 +17,4 @@ utils_files <- utils_files[basename(utils_files) != "init.R"]
 void_ <- lapply(utils_files, source)
 
 # renv
-source(here::here("r-utils", "renv", "init.R"))
+source("r-utils/renv/init.R")

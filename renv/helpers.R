@@ -76,7 +76,11 @@ install_profiles <- function(profiles = NULL) {
 
     # Cleaning existing library (to force reinstall from scratch)
     unlink("renv/library", recursive = TRUE)
-    source("renv/activate.R")
+    if (file.exists("renv/activate.R")) {
+        source("renv/activate.R")
+    } else {
+        renv::init(bare = TRUE, restart = FALSE, load = TRUE)
+    }
     renv::upgrade(prompt = FALSE)
 
     # Create profiles

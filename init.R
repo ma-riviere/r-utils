@@ -2,8 +2,15 @@
 '%notin%' <- Negate('%in%')
 `%ni%` <- `%notin%` # Alias
 '%||%' <- function(x, y) if (is.null(x)) y else x
-'%|e|%' <- function(x, y) if (is.null(x) || length(x) == 0 || !nzchar(x)) y else x
+'%|e|%' <- function(x, y) {
+    if (is.null(x) || length(x) == 0 || !nzchar(x)) y else x
+}
 "%s+%" <- function(lhs, rhs) paste0(lhs, rhs)
+
+# R Version
+if (Sys.getenv("RENV_PROFILE") == "") {
+    Sys.setenv(RENV_PROFILE = paste0("dev-", version$major, ".", sub("\\..*", "", version$minor)))
+}
 
 # Load individual files
 utils_files <- list.files(

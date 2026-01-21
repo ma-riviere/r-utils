@@ -22,7 +22,11 @@ knitr::knit_engines$set(
             } else {
                 dir <- tempdir()
             }
-            file <- cmdstanr::write_stan_file(options$code, dir = dir, force_overwrite = TRUE)
+            file <- cmdstanr::write_stan_file(
+                options$code,
+                dir = dir,
+                force_overwrite = TRUE
+            )
             mod <- cmdstanr::cmdstan_model(
                 stan_file = file,
                 cpp_options = list(

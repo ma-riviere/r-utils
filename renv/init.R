@@ -1,19 +1,19 @@
 source("r-utils/renv/helpers.R")
 
+# See:
+## - https://rstudio.github.io/renv/reference/config.html
+## - https://rstudio.github.io/renv/reference/snapshot.html
 options(
     repos = c(
         PPM = "https://packagemanager.posit.co/cran/latest",
         CRAN = "https://cloud.r-project.org"
-    )
+    ),
+    renv.config.pak.enabled = TRUE,
+    renv.config.sandbox.enabled = FALSE,
+    renv.config.snapshot.inference = FALSE,
+    renv.config.snapshot.validate = FALSE,
+    renv.config.synchronized.check = FALSE
 )
-
-# See:
-## - https://rstudio.github.io/renv/reference/config.html
-## - https://rstudio.github.io/renv/reference/snapshot.html
-Sys.setenv(RENV_CONFIG_SANDBOX_ENABLED = FALSE)
-Sys.setenv(RENV_CONFIG_SNAPSHOT_INFERENCE = FALSE)
-Sys.setenv(RENV_CONFIG_SNAPSHOT_VALIDATE = FALSE)
-Sys.setenv(RENV_CONFIG_SYNCHRONIZED_CHECK = FALSE)
 
 # GitHub
 if (!nzchar(Sys.getenv("GITHUB_PAT"))) {

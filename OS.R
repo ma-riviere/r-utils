@@ -4,7 +4,7 @@ get_os_info <- function() {
 
     os_info <- list()
     for (line in os_release_lines) {
-        if (grepl("=", line)) {
+        if (grepl("=", line, fixed = TRUE)) {
             parts <- strsplit(line, "=", fixed = TRUE)[[1]]
             key <- tolower(trimws(parts[1]))
             if (key %notin% c("id", "version_id", "version_codename")) {

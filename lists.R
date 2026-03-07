@@ -5,7 +5,7 @@ rmatch <- function(x, name) {
         return(x[[pos]])
     }
     for (el in x) {
-        if (class(el) == "list") {
+        if (inherits(el, "list")) {
             out <- Recall(el, name)
             if (!is.null(out)) return(out)
         }

@@ -2,8 +2,26 @@ get_r_version <- function() {
     return(paste0(version$major, ".", sub("\\..*", "", version$minor)))
 }
 
+# Set RENV_CONFIG_EXTERNAL_LIBRARIES to the global R library matching the current R version (major.minor) in /opt/R/
+set_external_libraries <- function(base_path = "/opt/R") {
+    r_minor <- get_r_version()
+    opt_dirs <- basename(list.files(base_path, full.names = FALSE))
+    match <- grep(paste0("^", r_minor), opt_dirs, value = TRUE)
+    if (length(match) != 1) {
+        return(invisible(NULL))
+    }
+    global_lib <- file.path(base_path, match, "lib/R/library")
+    if (!dir.exists(global_lib)) {
+        return(invisible(NULL))
+    }
+    Sys.setenv(RENV_CONFIG_EXTERNAL_LIBRARIES = global_lib)
+    return(invisible(global_lib))
+}
+
 is_installed <- function(pkg) {
-    suppressMessages({require(pkg, quietly = TRUE, warn.conflicts = FALSE, character.only = TRUE)})
+    suppressMessages({
+        require(pkg, quietly = TRUE, warn.conflicts = FALSE, character.only = TRUE)
+    })
 }
 
 read_packages <- function(profile) {

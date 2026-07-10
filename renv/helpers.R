@@ -24,13 +24,16 @@ is_installed <- function(pkg) {
     })
 }
 
-read_packages <- function(profile) {
-    packages_file <- paste0("packages-", profile, ".txt")
+read_package_file <- function(packages_file) {
     packages <- readLines(packages_file)
     packages <- trimws(packages)
-    packages <- packages[packages != ""]
+    packages <- packages[nzchar(packages)]
     packages <- gsub(packages, pattern = ",", replacement = "")
     return(packages)
+}
+
+read_packages <- function(profile) {
+    return(read_package_file(paste0("packages-", profile, ".txt")))
 }
 
 append_r_version_to_profile <- function(profile) {
@@ -80,6 +83,40 @@ install_profile_packages <- function(profile) {
 
     renv::install(packages, prompt = FALSE, rebuild = TRUE, repos = getOption("repos"))
     renv::snapshot(packages = sapply(packages, get_pkg_name), prompt = FALSE, force = TRUE)
+}
+
+#' Create or update renv/profiles/<prefix>-<R major.minor>/renv.lock from a package manifest.
+#'
+#' Unlike install_profiles(), the manifest path is decoupled from the profile prefix
+#' (e.g. packages.txt + "docker"), repositories are explicit (pass an immutable dated
+#' PPM snapshot for docker profiles), and the session is left on the generated profile.
+generate_profile <- function(prefix, packages_file = paste0("packages-", prefix, ".txt"), repos = getOption("repos")) {
+    if (!file.exists(packages_file)) {
+        stop("Package file not found: ", packages_file)
+    }
+    if (file.exists("renv/activate.R")) {
+        source("renv/activate.R")
+    } else {
+        renv::init(bare = TRUE, restart = FALSE, load = TRUE)
+    }
+
+    profile_with_version <- append_r_version_to_profile(prefix)
+    renv::activate(profile = profile_with_version)
+    options(repos = repos)
+
+    # Wipe the profile library so resolution starts from scratch instead of
+    # snapshotting stale versions already present in the library
+    unlink(renv::paths$library(), recursive = TRUE)
+
+    packages <- read_package_file(packages_file)
+    renv::install(packages, prompt = FALSE, rebuild = TRUE, repos = repos)
+    renv::snapshot(packages = vapply(packages, get_pkg_name, character(1)), prompt = FALSE, force = TRUE)
+
+    # Profiles own the lockfiles; drop root artifacts renv creates as side effects
+    unlink("renv.lock")
+    unlink("renv/profile")
+
+    return(invisible(profile_with_version))
 }
 
 install_profiles <- function(profiles = NULL) {

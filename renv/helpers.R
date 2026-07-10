@@ -90,7 +90,13 @@ install_profile_packages <- function(profile) {
 #' Unlike install_profiles(), the manifest path is decoupled from the profile prefix
 #' (e.g. packages.txt + "docker"), repositories are explicit (pass an immutable dated
 #' PPM snapshot for docker profiles), and the session is left on the generated profile.
-generate_profile <- function(prefix, packages_file = paste0("packages-", prefix, ".txt"), repos = getOption("repos")) {
+generate_profile <- function(prefix, packages_file = paste0("packages-", prefix, ".txt"), repos) {
+    if (missing(repos)) {
+        stop(
+            "Pass repos explicitly (an immutable dated PPM snapshot for docker profiles); ",
+            "defaulting to session repos would silently record rolling URLs."
+        )
+    }
     if (!file.exists(packages_file)) {
         stop("Package file not found: ", packages_file)
     }
@@ -101,12 +107,55 @@ generate_profile <- function(prefix, packages_file = paste0("packages-", prefix,
     }
 
     profile_with_version <- append_r_version_to_profile(prefix)
+    Sys.setenv(RENV_PROFILE = profile_with_version)
     renv::activate(profile = profile_with_version)
+
+    # renv cannot reliably rewire a session loaded under another profile (e.g. the
+    # dev-X.Y default from r-utils/init.R): installs would silently target the old
+    # profile's library. Run with RENV_PROFILE=<prefix>-<major.minor> set upfront.
+    if (!grepl(paste0("/profiles/", profile_with_version, "/"), renv::paths$library(), fixed = TRUE)) {
+        stop(
+            "Active renv library (",
+            renv::paths$library(),
+            ") does not match profile '",
+            profile_with_version,
+            "'. Set RENV_PROFILE=",
+            profile_with_version,
+            " in the environment before starting R."
+        )
+    }
+
+    # pak silently ADDS a rolling CRAN mirror when no configured repo is named
+    # "CRAN", which resolves versions that do not exist in a pinned snapshot.
+    # Naming the first repo CRAN suppresses that.
+    if (!"CRAN" %in% names(repos)) {
+        names(repos)[1] <- "CRAN"
+    }
     options(repos = repos)
 
     # Wipe the profile library so resolution starts from scratch instead of
     # snapshotting stale versions already present in the library
     unlink(renv::paths$library(), recursive = TRUE)
+
+    # pak must match the running R's ABI (e.g. R_getVar appeared in R 4.5): bootstrap
+    # the matching static build into the fresh profile library so it shadows any
+    # incompatible pak elsewhere on .libPaths
+    if (isTRUE(getOption("renv.config.pak.enabled"))) {
+        dir.create(renv::paths$library(), recursive = TRUE, showWarnings = FALSE)
+        # utils:: explicitly: renv's install.packages shim would delegate to
+        # renv::install -> pak, loading renv's private pak copy (possibly built
+        # for another R minor) before the correct one is installed
+        utils::install.packages(
+            "pak",
+            lib = renv::paths$library(),
+            repos = sprintf(
+                "https://r-lib.github.io/p/pak/stable/%s/%s/%s",
+                .Platform$pkgType,
+                R.Version()$os,
+                R.Version()$arch
+            )
+        )
+    }
 
     packages <- read_package_file(packages_file)
     renv::install(packages, prompt = FALSE, rebuild = TRUE, repos = repos)

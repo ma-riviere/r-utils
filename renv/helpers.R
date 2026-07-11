@@ -43,20 +43,21 @@ get_pkg_name <- function(remotes_string) {
     return(res$package %||% res$repo)
 }
 
-#' Create or update renv/profiles/<prefix>-<R major.minor>/renv.lock from a package manifest.
-#'
-#' The manifest path is decoupled from the profile prefix (e.g. packages.txt + "docker").
-#' Must run in a fresh R process with RENV_PROFILE=<prefix>-<R major.minor> set upfront:
-#' renv cannot reliably rewire a session loaded under another profile (installs would
-#' silently target the old profile's library). Batch generation is one process per profile:
-#'   RENV_PROFILE=dev-4.6 Rscript -e 'source("r-utils/renv/helpers.R"); generate_profile("dev", repos = ...)'
-generate_profile <- function(prefix, packages_file = paste0("packages-", prefix, ".txt"), repos) {
-    if (missing(repos)) {
-        stop(
-            "Pass repos explicitly (an immutable dated PPM snapshot); ",
-            "defaulting to session repos would silently record rolling URLs."
-        )
-    }
+# Create or update renv/profiles/<prefix>-<R major.minor>/renv.lock from a package manifest.
+#
+# Must run in a fresh R process with RENV_PROFILE=<prefix>-<R major.minor> set upfront:
+# renv cannot reliably rewire a session loaded under another profile (installs would
+# silently target the old profile's library). Batch generation is one process per profile:
+#   RENV_PROFILE=docker-4.6 Rscript -e 'source("r-utils/renv/helpers.R"); generate_profile()'
+#
+# Defaults: prefix is derived from RENV_PROFILE ('docker-4.6' -> 'docker'); the manifest is
+# packages-<prefix>.txt, falling back to the shared packages.txt when absent; repos is the
+# newest existing dated PPM snapshot (the immutable equivalent of /latest at generation time).
+generate_profile <- function(
+    prefix = profile_prefix_from_env(),
+    packages_file = default_packages_file(prefix),
+    repos = ppm_snapshot_repos()
+) {
     profile_with_version <- append_r_version_to_profile(prefix)
     if (!identical(Sys.getenv("RENV_PROFILE"), profile_with_version)) {
         stop(
@@ -71,17 +72,11 @@ generate_profile <- function(prefix, packages_file = paste0("packages-", prefix,
     return(invisible(profile_with_version))
 }
 
-#' Create or update the project's ROOT renv.lock (no profiles) from a package manifest.
-#'
-#' For projects with a single root lockfile restored directly in Docker (e.g. plumber2-base
-#' services). Must run in a fresh R process with RENV_PROFILE unset (or "default").
-generate_lockfile <- function(packages_file = "packages.txt", repos) {
-    if (missing(repos)) {
-        stop(
-            "Pass repos explicitly (an immutable dated PPM snapshot); ",
-            "defaulting to session repos would silently record rolling URLs."
-        )
-    }
+# Create or update the project's ROOT renv.lock (no profiles) from a package manifest.
+#
+# For projects with a single root lockfile restored directly in Docker (e.g. plumber2-base
+# services). Must run in a fresh R process with RENV_PROFILE unset (or "default").
+generate_lockfile <- function(packages_file = "packages.txt", repos = ppm_snapshot_repos()) {
     profile <- Sys.getenv("RENV_PROFILE")
     if (nzchar(profile) && profile != "default") {
         stop(
@@ -161,6 +156,63 @@ generate_active_lockfile <- function(packages_file, repos, profile = "default") 
     }
 
     return(invisible(lockfile_path))
+}
+
+# Derive the profile prefix from RENV_PROFILE ('docker-4.6' -> 'docker' under R 4.6)
+profile_prefix_from_env <- function() {
+    profile <- Sys.getenv("RENV_PROFILE")
+    suffix <- paste0("-", get_r_version())
+    if (!endsWith(profile, suffix) || identical(profile, suffix)) {
+        stop(
+            "Cannot derive a profile prefix: RENV_PROFILE is '",
+            profile,
+            "' but must be '<prefix>",
+            suffix,
+            "', set in the environment before starting R. Alternatively, pass prefix explicitly."
+        )
+    }
+    return(substr(profile, 1L, nchar(profile) - nchar(suffix)))
+}
+
+# Prefix-specific manifest when present (e.g. packages-dev.txt), else the shared packages.txt
+default_packages_file <- function(prefix) {
+    prefix_file <- paste0("packages-", prefix, ".txt")
+    if (!file.exists(prefix_file) && file.exists("packages.txt")) {
+        message("[renv-helpers] No ", prefix_file, " found: using packages.txt")
+        return("packages.txt")
+    }
+    return(prefix_file)
+}
+
+# Newest dated PPM snapshot that actually exists (today's may not be published yet, and not
+# every date has one), verified through the distro binary endpoint. Committed lockfiles must
+# never point at rolling URLs (/latest, cloud.r-project.org): recorded binary revisions rot
+# when upstream bumps them, breaking restores.
+ppm_snapshot_repos <- function(distro = "trixie", max_days_back = 14L) {
+    for (offset in 0:max_days_back) {
+        date <- format(Sys.Date() - offset)
+        check_url <- sprintf(
+            "https://packagemanager.posit.co/cran/__linux__/%s/%s/src/contrib/PACKAGES",
+            distro,
+            date
+        )
+        if (url_exists(check_url)) {
+            message("[renv-helpers] Using PPM snapshot ", date)
+            return(c(CRAN = paste0("https://packagemanager.posit.co/cran/", date)))
+        }
+    }
+    stop("No dated PPM snapshot found within ", max_days_back, " days; pass repos explicitly.")
+}
+
+url_exists <- function(target_url) {
+    return(tryCatch(
+        {
+            con <- suppressWarnings(url(target_url, open = "rb"))
+            close(con)
+            TRUE
+        },
+        error = \(e) FALSE
+    ))
 }
 
 validate_pinned_repos <- function(repos) {

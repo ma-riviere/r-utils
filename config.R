@@ -1,3 +1,1 @@
-options(
-    verbose = FALSE
-)
+options(verbose = FALSE)

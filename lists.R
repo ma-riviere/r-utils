@@ -103,22 +103,18 @@ rectangularize2 <- function(x) {
     x <- normalize_tree(x)
 
     # Now all data.frames are lists, so is_node = is.list works
-    purrr::modify_tree(
-        x,
-        is_node = is.list,
-        post = \(node) {
-            if (purrr::every(node, rlang::is_atomic)) {
-                return(data.table::as.data.table(node))
-            }
-            if (purrr::none(node, rlang::is_atomic)) {
-                return(data.table::rbindlist(node, use.names = TRUE, fill = TRUE))
-            }
-            if (purrr::some(node, rlang::is_atomic)) {
-                atomics <- purrr::keep(node, rlang::is_atomic) |> as.data.table()
-                non_atomics_list <- purrr::discard(node, rlang::is_atomic)
-                non_atomics <- purrr::reduce(non_atomics_list, pad_cbind)
-                return(pad_cbind(atomics, non_atomics))
-            }
+    purrr::modify_tree(x, is_node = is.list, post = \(node) {
+        if (purrr::every(node, rlang::is_atomic)) {
+            return(data.table::as.data.table(node))
         }
-    )
+        if (purrr::none(node, rlang::is_atomic)) {
+            return(data.table::rbindlist(node, use.names = TRUE, fill = TRUE))
+        }
+        if (purrr::some(node, rlang::is_atomic)) {
+            atomics <- purrr::keep(node, rlang::is_atomic) |> as.data.table()
+            non_atomics_list <- purrr::discard(node, rlang::is_atomic)
+            non_atomics <- purrr::reduce(non_atomics_list, pad_cbind)
+            return(pad_cbind(atomics, non_atomics))
+        }
+    })
 }

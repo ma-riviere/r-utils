@@ -13,13 +13,7 @@ if (Sys.getenv("RENV_PROFILE") == "") {
 }
 
 # Load individual files
-utils_files <- list.files(
-    "r-utils",
-    pattern = "*\\.R",
-    full.names = TRUE,
-    recursive = FALSE,
-    ignore.case = TRUE
-)
+utils_files <- list.files("r-utils", pattern = "*\\.R", full.names = TRUE, recursive = FALSE, ignore.case = TRUE)
 utils_files <- utils_files[basename(utils_files) != "init.R"]
 void_ <- lapply(utils_files, source)
 

@@ -28,9 +28,5 @@ get_wsl_info <- function() {
     os_info <- system("echo $WSL_DISTRO_NAME", intern = TRUE)
     os_info <- strsplit(os_info, "-", fixed = TRUE)[[1]]
 
-    return(list(
-        os_type = tolower(Sys.info()[[1]]),
-        os_name = tolower(os_info[1]),
-        os_version = tolower(os_info[2])
-    ))
+    return(list(os_type = tolower(Sys.info()[[1]]), os_name = tolower(os_info[1]), os_version = tolower(os_info[2])))
 }

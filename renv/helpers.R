@@ -32,122 +32,114 @@ read_package_file <- function(packages_file) {
     return(packages)
 }
 
-read_packages <- function(profile) {
-    return(read_package_file(paste0("packages-", profile, ".txt")))
-}
-
 append_r_version_to_profile <- function(profile) {
     r_version <- get_r_version()
     return(paste0(profile, "-", r_version))
 }
 
 get_pkg_name <- function(remotes_string) {
+    # renv:::renv_remotes_parse is internal but has no exported equivalent (renv 1.2.3)
     res <- renv:::renv_remotes_parse(remotes_string)
     return(res$package %||% res$repo)
 }
 
-set_renv_profile <- function(profile = "dev") {
-    existing_profiles <- list.files(path = "renv/profiles")
-    profile_with_version <- append_r_version_to_profile(profile)
-
-    profile_to_use <- "default"
-    if (profile_with_version %in% existing_profiles) {
-        profile_to_use <- profile_with_version
-    }
-    Sys.setenv(RENV_PROFILE = profile_to_use)
-    invisible(profile_to_use)
-}
-
-safe_restore <- function() {
-    lockfile_path <- renv::paths$lockfile()
-
-    if (file.exists(lockfile_path)) {
-        renv::restore(prompt = FALSE)
-    }
-    invisible(lockfile_path)
-}
-
-get_user_profiles <- function() {
-    profiles <- list.files(pattern = "packages-.*.txt")
-    profiles <- sub("packages-", "", profiles)
-    profiles <- sub(".txt", "", profiles)
-    profiles <- unique(profiles)
-    return(profiles)
-}
-
-install_profile_packages <- function(profile) {
-    profile_with_version <- append_r_version_to_profile(profile)
-    renv::activate(profile = profile_with_version)
-
-    packages <- read_packages(profile)
-
-    renv::install(packages, prompt = FALSE, rebuild = TRUE, repos = getOption("repos"))
-    renv::snapshot(packages = sapply(packages, get_pkg_name), prompt = FALSE, force = TRUE)
-}
-
 #' Create or update renv/profiles/<prefix>-<R major.minor>/renv.lock from a package manifest.
 #'
-#' Unlike install_profiles(), the manifest path is decoupled from the profile prefix
-#' (e.g. packages.txt + "docker"), repositories are explicit (pass an immutable dated
-#' PPM snapshot for docker profiles), and the session is left on the generated profile.
+#' The manifest path is decoupled from the profile prefix (e.g. packages.txt + "docker").
+#' Must run in a fresh R process with RENV_PROFILE=<prefix>-<R major.minor> set upfront:
+#' renv cannot reliably rewire a session loaded under another profile (installs would
+#' silently target the old profile's library). Batch generation is one process per profile:
+#'   RENV_PROFILE=dev-4.6 Rscript -e 'source("r-utils/renv/helpers.R"); generate_profile("dev", repos = ...)'
 generate_profile <- function(prefix, packages_file = paste0("packages-", prefix, ".txt"), repos) {
     if (missing(repos)) {
         stop(
-            "Pass repos explicitly (an immutable dated PPM snapshot for docker profiles); ",
+            "Pass repos explicitly (an immutable dated PPM snapshot); ",
             "defaulting to session repos would silently record rolling URLs."
         )
     }
+    profile_with_version <- append_r_version_to_profile(prefix)
+    if (!identical(Sys.getenv("RENV_PROFILE"), profile_with_version)) {
+        stop(
+            "RENV_PROFILE is '",
+            Sys.getenv("RENV_PROFILE"),
+            "' but must be '",
+            profile_with_version,
+            "', set in the environment before starting R."
+        )
+    }
+    generate_active_lockfile(packages_file, repos, profile = profile_with_version)
+    return(invisible(profile_with_version))
+}
+
+#' Create or update the project's ROOT renv.lock (no profiles) from a package manifest.
+#'
+#' For projects with a single root lockfile restored directly in Docker (e.g. plumber2-base
+#' services). Must run in a fresh R process with RENV_PROFILE unset (or "default").
+generate_lockfile <- function(packages_file = "packages.txt", repos) {
+    if (missing(repos)) {
+        stop(
+            "Pass repos explicitly (an immutable dated PPM snapshot); ",
+            "defaulting to session repos would silently record rolling URLs."
+        )
+    }
+    profile <- Sys.getenv("RENV_PROFILE")
+    if (nzchar(profile) && profile != "default") {
+        stop(
+            "RENV_PROFILE is '",
+            profile,
+            "': generate_lockfile() targets the root renv.lock. ",
+            "Unset it before starting R, or use generate_profile()."
+        )
+    }
+    return(invisible(generate_active_lockfile(packages_file, repos, profile = "default")))
+}
+
+# Shared core: installs the manifest packages into the ALREADY-ACTIVE renv environment and
+# snapshots its lockfile. Never selects, activates, or resets a profile; the target is fixed
+# by RENV_PROFILE at process startup and only verified here.
+generate_active_lockfile <- function(packages_file, repos, profile = "default") {
     if (!file.exists(packages_file)) {
         stop("Package file not found: ", packages_file)
     }
+    repos <- validate_pinned_repos(repos)
+
+    # Load renv infrastructure; the autoloader honors RENV_PROFILE set at startup and
+    # bootstraps renv into the profile library if the profile does not exist yet
     if (file.exists("renv/activate.R")) {
         source("renv/activate.R")
     } else {
         renv::init(bare = TRUE, restart = FALSE, load = TRUE)
     }
 
-    profile_with_version <- append_r_version_to_profile(prefix)
-    Sys.setenv(RENV_PROFILE = profile_with_version)
-    renv::activate(profile = profile_with_version)
-
-    # renv cannot reliably rewire a session loaded under another profile (e.g. the
-    # dev-X.Y default from r-utils/init.R): installs would silently target the old
-    # profile's library. Run with RENV_PROFILE=<prefix>-<major.minor> set upfront.
-    if (!grepl(paste0("/profiles/", profile_with_version, "/"), renv::paths$library(), fixed = TRUE)) {
-        stop(
-            "Active renv library (",
-            renv::paths$library(),
-            ") does not match profile '",
-            profile_with_version,
-            "'. Set RENV_PROFILE=",
-            profile_with_version,
-            " in the environment before starting R."
-        )
+    # Confirm the active library matches the target before wiping anything
+    library_path <- renv::paths$library()
+    library_matches_target <- if (identical(profile, "default")) {
+        !grepl("/profiles/", library_path, fixed = TRUE)
+    } else {
+        grepl(paste0("/profiles/", profile, "/"), library_path, fixed = TRUE)
+    }
+    if (!library_matches_target) {
+        stop("Active renv library (", library_path, ") does not match target '", profile, "'.")
     }
 
-    # pak silently ADDS a rolling CRAN mirror when no configured repo is named
-    # "CRAN", which resolves versions that do not exist in a pinned snapshot.
-    # Naming the first repo CRAN suppresses that.
-    if (!"CRAN" %in% names(repos)) {
-        names(repos)[1] <- "CRAN"
-    }
     options(repos = repos)
 
-    # Wipe the profile library so resolution starts from scratch instead of
-    # snapshotting stale versions already present in the library
-    unlink(renv::paths$library(), recursive = TRUE)
+    # Wipe the target library so resolution starts from scratch instead of snapshotting
+    # stale versions already present in the library (renv's install preflight needs the
+    # empty directory to exist)
+    unlink(library_path, recursive = TRUE)
+    dir.create(library_path, recursive = TRUE, showWarnings = FALSE)
 
     # pak must match the running R's ABI (e.g. R_getVar appeared in R 4.5): bootstrap
-    # the matching static build into the fresh profile library so it shadows any
-    # incompatible pak elsewhere on .libPaths
+    # the matching static build into the fresh library so it shadows any incompatible
+    # pak elsewhere on .libPaths
     if (isTRUE(getOption("renv.config.pak.enabled"))) {
-        dir.create(renv::paths$library(), recursive = TRUE, showWarnings = FALSE)
         # utils:: explicitly: renv's install.packages shim would delegate to
         # renv::install -> pak, loading renv's private pak copy (possibly built
         # for another R minor) before the correct one is installed
         utils::install.packages(
             "pak",
-            lib = renv::paths$library(),
+            lib = library_path,
             repos = sprintf(
                 "https://r-lib.github.io/p/pak/stable/%s/%s/%s",
                 .Platform$pkgType,
@@ -158,49 +150,36 @@ generate_profile <- function(prefix, packages_file = paste0("packages-", prefix,
     }
 
     packages <- read_package_file(packages_file)
-    renv::install(packages, prompt = FALSE, rebuild = TRUE, repos = repos)
+    renv::install(packages, prompt = FALSE, repos = repos)
     renv::snapshot(packages = vapply(packages, get_pkg_name, character(1)), prompt = FALSE, force = TRUE)
 
-    # Profiles own the lockfiles; drop root artifacts renv creates as side effects
-    unlink("renv.lock")
-    unlink("renv/profile")
+    # renv.config.snapshot.validate is disabled session-wide (renv/init.R): validate the
+    # generated lockfile explicitly when jsonvalidate is available
+    lockfile_path <- renv::paths$lockfile()
+    if (requireNamespace("jsonvalidate", quietly = TRUE)) {
+        renv::lockfile_validate(lockfile = lockfile_path, error = TRUE)
+    }
 
-    return(invisible(profile_with_version))
+    return(invisible(lockfile_path))
 }
 
-install_profiles <- function(profiles = NULL) {
-    # Profiles to install
-    profiles_to_install <- get_user_profiles()
-    if (!is.null(profiles)) {
-        profiles_to_install <- intersect(profiles_to_install, profiles)
+validate_pinned_repos <- function(repos) {
+    rolling <- grepl("/latest/?$", repos) | grepl("cloud.r-project.org", repos, fixed = TRUE)
+    if (any(rolling)) {
+        stop(
+            "Rolling repository URL(s) would make the lockfile non-reproducible: ",
+            paste(repos[rolling], collapse = ", "),
+            ". Use an immutable dated PPM snapshot (https://packagemanager.posit.co/cran/<YYYY-MM-DD>)."
+        )
     }
-    if (is.null(profiles_to_install) || length(profiles_to_install) == 0) {
-        return("No matching profiles")
+    # pak silently ADDS a rolling CRAN mirror when no configured repo is named "CRAN",
+    # which resolves versions that do not exist in a pinned snapshot
+    if (!"CRAN" %in% names(repos)) {
+        if (length(repos) == 1) {
+            names(repos) <- "CRAN"
+        } else {
+            stop("Name the repository standing in for CRAN 'CRAN' (pak adds a rolling CRAN mirror otherwise).")
+        }
     }
-
-    # Cleaning existing library (to force reinstall from scratch)
-    unlink("renv/library", recursive = TRUE)
-    if (file.exists("renv/activate.R")) {
-        source("renv/activate.R")
-    } else {
-        renv::init(bare = TRUE, restart = FALSE, load = TRUE)
-    }
-    renv::upgrade(prompt = FALSE)
-
-    # Create profiles
-    for (profile in profiles_to_install) {
-        cat("\nInstalling profile:", profile, "\n")
-        install_profile_packages(profile)
-    }
-
-    # Reset to default (or dev if it is defined)
-    dev_profile <- set_renv_profile("dev")
-    renv::activate(profile = dev_profile)
-    safe_restore()
-
-    # Cleaning root renv.lock (since we use profiles)
-    unlink("renv.lock")
-    unlink("renv/profile")
-
-    return(invisible(profiles_to_install))
+    return(repos)
 }

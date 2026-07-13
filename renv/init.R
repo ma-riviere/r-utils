@@ -1,4 +1,7 @@
-source("r-utils/renv/helpers.R")
+if (!exists("r_utils_path", inherits = FALSE)) {
+    stop("r-utils/renv/init.R must be loaded through r-utils/init.R.")
+}
+source(file.path(r_utils_path, "renv", "helpers.R"), local = environment())
 
 # Expose global R library to renv (for dev tools like httpgd)
 if (startsWith(Sys.getenv("RENV_PROFILE"), "dev-")) {
@@ -9,10 +12,7 @@ if (startsWith(Sys.getenv("RENV_PROFILE"), "dev-")) {
 ## - https://rstudio.github.io/renv/reference/config.html
 ## - https://rstudio.github.io/renv/reference/snapshot.html
 options(
-    repos = c(
-        PPM = "https://packagemanager.posit.co/cran/latest",
-        CRAN = "https://cloud.r-project.org"
-    ),
+    repos = c(PPM = "https://packagemanager.posit.co/cran/latest", CRAN = "https://cloud.r-project.org"),
     renv.config.pak.enabled = TRUE,
     renv.config.sandbox.enabled = FALSE,
     renv.config.snapshot.inference = FALSE,

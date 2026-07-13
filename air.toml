@@ -1,5 +1,5 @@
 [format]
 line-width = 120
 indent-width = 4
-persistent-line-breaks = true
+persistent-line-breaks = false
 default-exclude = false

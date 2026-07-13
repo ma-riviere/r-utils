@@ -48,7 +48,7 @@ get_pkg_name <- function(remotes_string) {
 # Must run in a fresh R process with RENV_PROFILE=<prefix>-<R major.minor> set upfront:
 # renv cannot reliably rewire a session loaded under another profile (installs would
 # silently target the old profile's library). Batch generation is one process per profile:
-#   RENV_PROFILE=docker-4.6 Rscript -e 'source("r-utils/renv/helpers.R"); generate_profile()'
+#   RENV_PROFILE=docker-4.6 Rscript -e 'source("path/to/r-utils/renv/helpers.R"); generate_profile()'
 #
 # Defaults: prefix is derived from RENV_PROFILE ('docker-4.6' -> 'docker'); the manifest is
 # packages-<prefix>.txt, falling back to the shared packages.txt when absent; repos is the
@@ -191,11 +191,7 @@ default_packages_file <- function(prefix) {
 ppm_snapshot_repos <- function(distro = "trixie", max_days_back = 14L) {
     for (offset in 0:max_days_back) {
         date <- format(Sys.Date() - offset)
-        check_url <- sprintf(
-            "https://packagemanager.posit.co/cran/__linux__/%s/%s/src/contrib/PACKAGES",
-            distro,
-            date
-        )
+        check_url <- sprintf("https://packagemanager.posit.co/cran/__linux__/%s/%s/src/contrib/PACKAGES", distro, date)
         if (url_exists(check_url)) {
             message("[renv-helpers] Using PPM snapshot ", date)
             return(c(CRAN = paste0("https://packagemanager.posit.co/cran/", date)))
